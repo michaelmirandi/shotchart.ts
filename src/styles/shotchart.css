@@ -2,6 +2,8 @@
   fill-opacity: 0.7;
 }
 
+/* All stroke widths / font sizes are in feet: the SVG viewBox is 1 unit = 1 foot. */
+
 .shot-chart-court * {
   fill: transparent;
   stroke: #333333;
@@ -18,11 +20,63 @@
   stroke-dasharray: 1.5, 1;
 }
 
+.shot-chart-court-key-block {
+  fill: #333333;
+}
+
 .shot-chart-court-hoop,
 .shot-chart-court-backboard {
   z-index: 100;
 }
 
+/* -------------------- Floor -------------------- */
+
+/* On a floor the lines become 2" paint. */
+.shot-chart-court--on-floor * {
+  stroke: #ffffff;
+  stroke-opacity: 0.95;
+  stroke-width: 0.17;
+}
+
+.shot-chart-court--on-floor .shot-chart-court-key-block {
+  fill: #ffffff;
+}
+
+.shot-chart-court--on-floor .shot-chart-court-hoop {
+  stroke: #e8531f;
+  stroke-width: 0.12;
+}
+
+.shot-chart-court--on-floor .shot-chart-court-backboard {
+  stroke-width: 0.25;
+}
+
+/* Labels keep their hairline: a 2" stroke on 1' glyphs turns them into blobs. */
+.shot-chart-court--on-floor text {
+  stroke-width: 0.05;
+}
+
+.shot-chart-floor * {
+  pointer-events: none;
+}
+
+/* -------------------- Overlays -------------------- */
+
+.shot-chart-hexbins path {
+  stroke: none;
+}
+
+/* Full-radius cell footprints, drawn beneath the frequency-sized fills. */
+.shot-chart-hexbin-outlines path {
+  fill: none;
+  stroke: currentColor;
+  stroke-opacity: 0.2;
+  stroke-width: 0.05;
+}
+
+/* -------------------- Zones -------------------- */
+
+/* Keep zone borders dark even on a floor (declared after the on-floor rules). */
 .shotzone {
   stroke: black;
   stroke-width: 0.08;
@@ -37,7 +91,7 @@
   border-color: black;
 }
 
-text {
+.shotchart text {
   font-size: 0.07rem;
   stroke: black !important;
   fill: black !important;
@@ -48,8 +102,10 @@ text {
   display: block;
 }
 
-.right-corner-three-zone-text,
-.left-corner-three-zone-text {
+/* Corner-three zones are ~3' wide — their labels get a smaller size. Scoped
+ * under `.shotchart` so this outranks the general `.shotchart text` rule. */
+.shotchart .right-corner-three-zone-text,
+.shotchart .left-corner-three-zone-text {
   font-size: 0.04rem;
   stroke: black !important;
 }
@@ -65,7 +121,7 @@ text {
 }
 
 @media screen and (min-aspect-ratio: 11 / 8) {
-  text {
+  .shotchart text {
     font-size: 0.07rem;
   }
 
@@ -76,30 +132,30 @@ text {
 }
 
 @media screen and (min-width: 1800px) {
-  text {
+  .shotchart text {
     font-size: 0.06rem;
   }
 }
 
 @media screen and (min-width: 2300px) {
-  text {
+  .shotchart text {
     font-size: 0.15rem;
   }
 }
 
 @media screen and (max-width: 800px) {
-  text {
+  .shotchart text {
     font-size: 0.08rem;
   }
 
-  .right-corner-three-zone-text,
-  .left-corner-three-zone-text {
+  .shotchart .right-corner-three-zone-text,
+  .shotchart .left-corner-three-zone-text {
     font-size: 0.05rem;
   }
 }
 
 @media print {
-  text {
+  .shotchart text {
     font-size: 0.09rem;
   }
 }

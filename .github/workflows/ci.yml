@@ -25,6 +25,7 @@ jobs:
 
       - run: pnpm typecheck
       - run: pnpm ci:lint
+      - run: pnpm test
       - run: pnpm build
       - run: pnpm ci:publint
       - run: pnpm ci:attw

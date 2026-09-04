@@ -1,19 +1,14 @@
-import { type Selection, select } from "d3-selection";
+import type { Selection } from "d3-selection";
 import { appendArcPath } from "./geometry/arcs";
 import { polygonCentroid } from "./geometry/centroid";
 import { formatPercentage } from "./geometry/percentage";
-import { drawCourt } from "./halfcourt";
-import { createShotchartSettings } from "./settings/chart";
-import { collegeSettings } from "./settings/college";
-import { nbaSettings } from "./settings/nba";
+import { mountHalfcourt } from "./halfcourt";
 import { zoneColor } from "./themes/color-scale";
 import { orangeBluePalette, redGreenPalette } from "./themes/palettes";
 import { percentileTextClass, percentileTextClassBlueOrange } from "./themes/percentile-text";
 import type {
   BackgroundTheme,
   CourtLines,
-  CourtType,
-  LeagueSettings,
   Point,
   ShotchartSettings,
   ShotchartZone,
@@ -89,26 +84,23 @@ const ZONE_CLASSNAME: Record<ZoneKey, ShotchartZoneClassName> = {
 
 const ZONE_KEYS = Object.keys(ZONE_CODE) as ZoneKey[];
 
-function resolveLeagueSettings(
-  courtType: CourtType | undefined,
-  override: LeagueSettings | undefined,
-): LeagueSettings {
-  if (override) return override;
-  return courtType === "college" ? collegeSettings : nbaSettings;
-}
-
 function findZoneData(code: ShotchartZone, data: ZoneData[]): ZoneData | undefined {
   return data.find((d) => d.bucket === code);
 }
 
+// Floater label placement is widest on NBA-paint (16') courts. On narrower
+// paints (NCAA 12') the floater zones collapse, so labels overlap unless
+// nudged. Drive off `keyWidth` rather than `leagueId` so the same logic
+// applies to WNBA (16'), FIBA (16.08'), and NFHS (12') automatically.
 function labelLayout(
   key: ZoneKey,
-  league: "nba" | "college",
+  keyWidth: number,
 ): { top: number; bottom: number; left: number; right: number } {
+  const wideKey = keyWidth >= 15; // NBA, WNBA, FIBA
   if (key === "rim") return { top: -1.5, bottom: 3, left: 0, right: 0 };
   if (key === "mf") return { top: 0, bottom: 3, left: 0, right: 0 };
-  if (key === "lf" && league === "nba") return { top: 0, bottom: 2, left: 0, right: 2 };
-  if (key === "rf" && league === "nba") return { top: 0, bottom: 2, left: -2, right: 0 };
+  if (key === "lf" && wideKey) return { top: 0, bottom: 2, left: 0, right: 2 };
+  if (key === "rf" && wideKey) return { top: 0, bottom: 2, left: -2, right: 0 };
   return { top: 0, bottom: 2, left: 0, right: 0 };
 }
 
@@ -128,19 +120,12 @@ export function drawZones(
     -Math.PI,
     Math.PI,
     settings.courtWidth / 2,
-    settings.visibleCourtLength() - settings.basketProtrusionLength - settings.basketDiameter / 2,
+    settings.basketCenterY,
     "rimXY",
     courtLines,
   )
     .attr("class", "shotzone rim-zone")
-    .attr(
-      "transform",
-      `translate(${settings.courtWidth / 2}, ${
-        settings.visibleCourtLength() -
-        settings.basketProtrusionLength -
-        settings.basketDiameter / 2
-      })`,
-    );
+    .attr("transform", `translate(${settings.courtWidth / 2}, ${settings.basketCenterY})`);
 
   appendArcPath(
     base,
@@ -148,19 +133,12 @@ export function drawZones(
     -Math.PI,
     Math.PI,
     settings.courtWidth / 2,
-    settings.visibleCourtLength() - settings.basketProtrusionLength - settings.basketDiameter / 2,
+    settings.basketCenterY,
     "floaterXY",
     courtLines,
   )
     .attr("class", "shotzone floater")
-    .attr(
-      "transform",
-      `translate(${settings.courtWidth / 2}, ${
-        settings.visibleCourtLength() -
-        settings.basketProtrusionLength -
-        settings.basketDiameter / 2
-      })`,
-    );
+    .attr("transform", `translate(${settings.courtWidth / 2}, ${settings.basketCenterY})`);
 
   const rc3: Zone = {
     className: ZONE_CLASSNAME.rc3,
@@ -220,13 +198,13 @@ export function drawZones(
   };
 
   const r3Line = courtLines.threePointLineXY.filter(
-    (p: Point) => p.x < settings.leagueSettings.rightThreeInside.x,
+    (p: Point) => p.x < settings.rightThreeInside.x,
   );
 
   r3.points = r3.points.concat(r3Line).concat({ x: 5, y: 0 });
 
   const l3Line = courtLines.threePointLineXY.filter(
-    (p: Point) => p.x > settings.courtWidth - settings.leagueSettings.leftThreeInside.x,
+    (p: Point) => p.x > settings.courtWidth - settings.leftThreeInside.x,
   );
 
   const l3: Zone = {
@@ -254,8 +232,7 @@ export function drawZones(
 
   const m3Line = courtLines.threePointLineXY.filter(
     (p: Point) =>
-      p.x > settings.leagueSettings.rightThreeInside.x &&
-      p.x < settings.courtWidth - settings.leagueSettings.leftThreeInside.x,
+      p.x > settings.rightThreeInside.x && p.x < settings.courtWidth - settings.leftThreeInside.x,
   );
 
   m3.points = m3.points.concat(m3Line);
@@ -326,9 +303,13 @@ export function drawZones(
       p.x < settings.courtWidth - settings.rightBaselineMidrangeInside.x,
   );
 
+  // Several zones below intentionally mutate shared arrays via .reverse() so
+  // downstream zones (rf, lf, mf) read the already-reversed result. Don't
+  // "defensively copy" with .slice() — it silently breaks the polygon winding
+  // for those downstream zones and leaves them as broken triangles.
   const rwmr: Zone = {
     className: ZONE_CLASSNAME.rwmr,
-    points: r3Line.slice().reverse().concat(insideRwmr),
+    points: r3Line.reverse().concat(insideRwmr),
   };
 
   const insideLwmr = courtLines.floaterXY.filter(
@@ -343,7 +324,7 @@ export function drawZones(
 
   const lwmr: Zone = {
     className: ZONE_CLASSNAME.lwmr,
-    points: l3Line.concat(insideLwmr.slice().reverse()),
+    points: l3Line.concat(insideLwmr.reverse()),
   };
 
   const insideMmr = courtLines.floaterXY.filter(
@@ -352,7 +333,7 @@ export function drawZones(
 
   const mmr: Zone = {
     className: ZONE_CLASSNAME.mmr,
-    points: m3Line.concat(insideMmr.slice().reverse()),
+    points: m3Line.concat(insideMmr.reverse()),
   };
 
   const insideRf = courtLines.rimXY.filter(
@@ -362,9 +343,17 @@ export function drawZones(
       p.x < settings.courtWidth / 2,
   );
 
+  // The rim ring (r = rimRange) bottoms out just above the baseline, so the
+  // floater zones are closed down to the baseline at center court; the rim
+  // polygon is appended last and paints over the overlap.
+  const baselineCenter: Point = {
+    x: settings.courtWidth / 2,
+    y: settings.visibleCourtLength(),
+  };
+
   const rf: Zone = {
     className: ZONE_CLASSNAME.rf,
-    points: insideRbmr.concat(insideRwmr).concat(insideRf.slice().reverse()),
+    points: insideRbmr.concat(insideRwmr).concat(insideRf.reverse()).concat([baselineCenter]),
   };
 
   const insideLf = courtLines.rimXY.filter(
@@ -376,7 +365,7 @@ export function drawZones(
 
   const lf: Zone = {
     className: ZONE_CLASSNAME.lf,
-    points: insideLf.concat(insideLbmr.slice().reverse().concat(insideLwmr)),
+    points: insideLf.concat([baselineCenter], insideLbmr.reverse(), insideLwmr),
   };
 
   const insideMf = courtLines.rimXY.filter(
@@ -420,20 +409,16 @@ export function createZonedShotchart(
   svg: SVGSVGElement,
   options: ZonedShotchartOptions,
 ): ZonedShotchartInstance {
-  const league = resolveLeagueSettings(options.courtType, options.leagueSettings);
-  const settings = createShotchartSettings(league);
+  const { settings, layers, courtLines } = mountHalfcourt(svg, options);
+  const league = settings.leagueSettings;
 
   let currentData: ZoneData[] = options.data;
   let currentTheme: Theme = options.theme ?? "red-green";
   let currentBackground: BackgroundTheme = options.backgroundTheme ?? "light";
 
-  const root = select(svg)
-    .attr("width", settings.width)
-    .attr("viewBox", `0 0 ${settings.courtWidth} ${settings.visibleCourtLength()}`);
-
-  const base = root.append("g").attr("class", "shot-chart-court");
-
-  const courtLines = drawCourt(base, settings);
+  // Zones, polygons and labels all live in the court group — the zone label
+  // stylesheet rules are scoped to it.
+  const base = layers.court;
   const zonePoints = drawZones(base, settings, courtLines);
 
   const registry = new Map<ZoneKey, ZoneRegistration>();
@@ -451,7 +436,7 @@ export function createZonedShotchart(
       .attr("id", "shotzone") as unknown as PolygonSelection;
 
     const [cx, cy] = polygonCentroid(points);
-    const layout = labelLayout(key, league.leagueId);
+    const layout = labelLayout(key, league.keyWidth);
 
     const fgmText = base
       .append("text")
@@ -509,7 +494,7 @@ export function createZonedShotchart(
       applyState();
     },
     destroy(): void {
-      base.remove();
+      layers.destroy();
     },
   };
 }

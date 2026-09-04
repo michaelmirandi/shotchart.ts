@@ -1,7 +1,7 @@
 {
-  "name": "shotchart.d3.ts",
+  "name": "shotchart.ts",
   "version": "0.2.0",
-  "description": "Framework-agnostic basketball shotchart primitives built on D3. Renders to any SVG element. Supports NBA and college court dimensions.",
+  "description": "A TypeScript framework-agnostic basketball shotchart primitives built on D3. Renders to any SVG element. Supports NBA and college court dimensions.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -30,6 +30,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "biome check --write .",
     "ci:lint": "biome check .",
     "ci:publint": "publint",
@@ -40,7 +41,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/michaelmirandi/shotchart.d3.ts.git"
+    "url": "git+https://github.com/michaelmirandi/shotchart.ts.git"
   },
   "keywords": [
     "shotchart",
@@ -55,11 +56,12 @@
   "author": "Michael Mirandi",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/michaelmirandi/shotchart.d3.ts/issues"
+    "url": "https://github.com/michaelmirandi/shotchart.ts/issues"
   },
-  "homepage": "https://github.com/michaelmirandi/shotchart.d3.ts#readme",
+  "homepage": "https://github.com/michaelmirandi/shotchart.ts#readme",
   "dependencies": {
     "d3-array": "^3.2.4",
+    "d3-hexbin": "^0.2.2",
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
     "d3-shape": "^3.2.0"
@@ -68,11 +70,14 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@biomejs/biome": "^1.9.4",
     "@types/d3-array": "^3.2.1",
+    "@types/d3-hexbin": "^0.2.5",
     "@types/d3-scale": "^4.0.8",
     "@types/d3-selection": "^3.0.10",
     "@types/d3-shape": "^3.1.6",
+    "happy-dom": "^20.14.0",
     "publint": "^0.3.21",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^5.0.0"
   }
 }
