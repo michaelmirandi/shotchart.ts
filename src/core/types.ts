@@ -327,3 +327,87 @@ export interface FullcourtInstance {
   /** Remove the rendered court from the host SVG. */
   destroy(): void;
 }
+
+// ---------------------------------------------------------------------------
+// Tracking
+// ---------------------------------------------------------------------------
+
+export type TrackingTeam = "home" | "away";
+
+/**
+ * One player's position in a tracking frame, in feet from center court:
+ * `x` along the court's length (baskets at about ±41.75), `y` across it.
+ */
+export interface TrackingPlayer {
+  id: string | number;
+  team: TrackingTeam;
+  x: number;
+  y: number;
+  /** Drawn inside the dot — usually the jersey number. */
+  label?: string;
+}
+
+/** The ball's position in feet from center court. `z` is height off the floor. */
+export interface TrackingBall {
+  x: number;
+  y: number;
+  z?: number;
+}
+
+/** Everything on the court at one instant. */
+export interface TrackingFrame {
+  /** Source frame index (e.g. 25 Hz `frame_idx`). Informational. */
+  frame: number;
+  /** Seconds left in the period. */
+  gameClock?: number;
+  /** Seconds left on the shot clock; `null` when it is off. */
+  shotClock?: number | null;
+  players: TrackingPlayer[];
+  ball?: TrackingBall | null;
+}
+
+export interface TrackingStyle {
+  /** Player dot radius in feet. */
+  playerRadius: number;
+  homeColor: string;
+  awayColor: string;
+  /** Ball radius in feet at floor level; grows with `z`. */
+  ballRadius: number;
+  ballColor: string;
+  /** Draw each player's `label` inside the dot. */
+  labels: boolean;
+  labelColor: string;
+  opacity: number;
+}
+
+export interface TrackingOptions extends FullcourtOptions {
+  data: TrackingFrame[];
+  style?: Partial<TrackingStyle>;
+  /** Source frame rate. Defaults to `25`. */
+  fps?: number;
+  /** Playback speed multiplier. Defaults to `1`. */
+  speed?: number;
+  /** Restart from the first frame when playback reaches the end. Defaults to `false`. */
+  loop?: boolean;
+  /** Called whenever the displayed frame changes (playback or `setFrame`). */
+  onFrame?: (index: number, frame: TrackingFrame) => void;
+}
+
+export interface TrackingInstance {
+  /** Jump to a frame index (clamped to the data). */
+  setFrame(index: number): void;
+  /** The index of the displayed frame. */
+  frame(): number;
+  /** Start playback from the current frame (restarts if at the end). */
+  play(): void;
+  pause(): void;
+  isPlaying(): boolean;
+  /** Change the playback speed multiplier. */
+  setSpeed(speed: number): void;
+  /** Replace the frames and jump back to the first one. */
+  setData(data: TrackingFrame[]): void;
+  /** Merge style overrides and re-render. */
+  setStyle(style: Partial<TrackingStyle>): void;
+  /** Stop playback and remove the rendered chart from the host SVG. */
+  destroy(): void;
+}

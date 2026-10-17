@@ -3,7 +3,7 @@
 Framework-agnostic basketball shotchart primitives built on D3. Renders to any SVG element — works in React, Vue, Svelte, vanilla JS, anything that can hand you a `<svg>`.
 
 - **Six court presets** — NBA, WNBA, NCAA-M, NCAA-W, FIBA, NFHS High School
-- **Five charts** — halfcourt, fullcourt, 14-zone shotchart, per-shot scatter, hexbin density
+- **Six charts** — halfcourt, fullcourt, 14-zone shotchart, per-shot scatter, hexbin density, player-tracking playback
 - **Procedural hardwood floor** — planks, seams and grain drawn in SVG, no image assets
 - **Targeted updates** — `setData()`, `setTheme()`, `setStyle()`, `setRadius()` mutate the existing DOM instead of rebuilding
 - **Dual CJS + ESM**, full `.d.ts` declarations, d3 externalized
@@ -134,6 +134,81 @@ court.destroy();
 | `floor`          | `FloorInput`                 | `"none"`       |                                                             |
 
 Returns `{ destroy(): void }`. Each half is its own `<g class="shot-chart-court shot-chart-court--near|--far">`.
+
+## Tracking
+
+Play back optical tracking data — ten players and the ball — on a full court. Dots are keyed by player id, so each frame only moves existing nodes. Playback is time-based (`fps × speed`), independent of the display's refresh rate, and the instance exposes everything a scrubber needs.
+
+```ts
+import { createTracking, type TrackingFrame } from "shotchart.ts";
+
+const frames: TrackingFrame[] = [
+  {
+    frame: 0,
+    gameClock: 1198,
+    shotClock: 30,
+    players: [
+      { id: 140, team: "away", x: 3.14, y: 8.9, label: "1" },
+      { id: 464, team: "home", x: -1.36, y: -0.16, label: "6" },
+      // …
+    ],
+    ball: { x: -0.07, y: -2.8, z: 3.83 },
+  },
+  // …one per frame
+];
+
+const chart = createTracking(svg, {
+  courtType: "ncaam",
+  data: frames,
+  fps: 25,
+  onFrame: (i, frame) => (scrubber.value = String(i)),
+});
+
+chart.play();
+scrubber.oninput = () => chart.setFrame(Number(scrubber.value));
+```
+
+### `TrackingFrame`
+
+Coordinates are **feet from center court**: `x` along the court's length (baskets at about ±41.75 on a 94' court), `y` across it, ball `z` is height. On a horizontal court `+x` points right and `+y` up.
+
+| Field       | Type                                                                 | Notes                                                    |
+| ----------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
+| `frame`     | `number`                                                             | Source frame index. Informational.                       |
+| `gameClock` | `number?`                                                            | Seconds left in the period.                              |
+| `shotClock` | `number \| null?`                                                    | Seconds left on the shot clock.                          |
+| `players`   | `{ id: string \| number; team: "home" \| "away"; x; y; label? }[]`   | `label` is drawn inside the dot (jersey number).         |
+| `ball`      | `{ x; y; z? } \| null?`                                              | The ball grows slightly with `z` as a height cue.        |
+
+A frame with no players (dead-ball gaps in some feeds) draws only the ball.
+
+### `createTracking(svg, options)`
+
+Takes every `createFullcourt` option plus:
+
+| Option    | Type                              | Default | Notes                                                    |
+| --------- | --------------------------------- | ------- | -------------------------------------------------------- |
+| `data`    | `TrackingFrame[]`                 | —       | Required.                                                |
+| `style`   | `Partial<TrackingStyle>`          | —       | `playerRadius` (1), `homeColor`, `awayColor`, `ballRadius` (0.5), `ballColor`, `labels` (true), `labelColor`, `opacity`. |
+| `fps`     | `number`                          | `25`    | Source frame rate.                                       |
+| `speed`   | `number`                          | `1`     | Playback multiplier.                                     |
+| `loop`    | `boolean`                         | `false` | Restart at the end instead of stopping.                  |
+| `onFrame` | `(index, frame) => void`          | —       | Fires whenever the displayed frame changes.              |
+
+Returns `{ setFrame(i), frame(), play(), pause(), isPlaying(), setSpeed(x), setData(frames), setStyle(style), destroy() }`. Marks live in `<g class="shot-chart-tracking">` as `g.tracking-player.tracking-player--home|--away` and `circle.tracking-ball`.
+
+### BBI adapter
+
+`fromBbiTracking(playerRows, ballRows?, { roster? })` turns flat BBI `player_frames` / `ball_frames` rows (strings from a CSV parser or numbers) into `TrackingFrame[]`. Frames follow the ball rows, so dead-ball stretches without player data come back with `players: []`. BBI already uses feet from center court, so coordinates pass through unchanged.
+
+```ts
+import { createTracking, fromBbiTracking } from "shotchart.ts";
+
+const frames = fromBbiTracking(playerRows, ballRows, { roster });
+// One possession: cut by source frame index.
+const clip = frames.filter((f) => f.frame >= 1837 && f.frame <= 2300);
+createTracking(svg, { courtType: "ncaam", data: clip });
+```
 
 ## Zoned shotchart
 
@@ -393,6 +468,10 @@ import {
   createShotchartSettings,
   shotToSvg,
   svgToShot,
+  trackingToSvg,
+
+  // tracking data
+  fromBbiTracking,
 
   // aggregation
   binShots,
@@ -440,7 +519,7 @@ pnpm lint        # biome check --write
 - [x] Hexbin density shotchart
 - [x] Fullcourt
 - [ ] Team designs & customizable courts
-- [ ] Player tracking for Fullcourt
+- [x] Player tracking for Fullcourt
 
 ## License
 

@@ -1,20 +1,24 @@
 import { drawFloor, resolveFloor, styleCourtForFloor } from "./floor";
 import { drawCourt } from "./halfcourt";
-import { mountChart } from "./mount";
+import { type ChartLayers, mountChart } from "./mount";
 import { createShotchartSettings } from "./settings/chart";
 import { resolveLeagueSettings } from "./settings/resolve";
-import type { FullcourtInstance, FullcourtOptions } from "./types";
+import type { FullcourtInstance, FullcourtOptions, Orientation, ShotchartSettings } from "./types";
+
+export interface MountedFullcourt {
+  /** Half-court settings — the full court is two of these halves. */
+  settings: ShotchartSettings;
+  layers: ChartLayers;
+  orientation: Orientation;
+}
 
 /**
- * Mount a full court. Two `drawCourt` halves (each spanning the whole half
+ * Draw a full court and return its layers. Two `drawCourt` halves (each spanning the whole half
  * court, so they bring their own sidelines, division line, and half of the
  * center circle) are composed in a vertical local frame; the horizontal
  * layout is that frame rotated as a whole, so geometry is never duplicated.
  */
-export function createFullcourt(
-  svg: SVGSVGElement,
-  options: FullcourtOptions = {},
-): FullcourtInstance {
+export function mountFullcourt(svg: SVGSVGElement, options: FullcourtOptions): MountedFullcourt {
   const league = resolveLeagueSettings(options.courtType, options.leagueSettings);
   const settings = createShotchartSettings(league, "half");
   const orientation = options.orientation ?? "horizontal";
@@ -54,6 +58,16 @@ export function createFullcourt(
     styleCourtForFloor(near, floor);
     styleCourtForFloor(far, floor);
   }
+
+  return { settings, layers, orientation };
+}
+
+/** Mount a static full court. Returns an instance with a `destroy()` method. */
+export function createFullcourt(
+  svg: SVGSVGElement,
+  options: FullcourtOptions = {},
+): FullcourtInstance {
+  const { layers } = mountFullcourt(svg, options);
 
   return {
     destroy(): void {

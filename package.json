@@ -1,6 +1,6 @@
 {
   "name": "shotchart.ts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A TypeScript framework-agnostic basketball shotchart primitives built on D3. Renders to any SVG element. Supports NBA and college court dimensions.",
   "type": "module",
   "main": "./dist/index.cjs",

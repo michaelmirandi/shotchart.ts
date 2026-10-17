@@ -25,6 +25,13 @@ export type {
   ShotchartZone,
   ShotchartZoneClassName,
   Theme,
+  TrackingBall,
+  TrackingFrame,
+  TrackingInstance,
+  TrackingOptions,
+  TrackingPlayer,
+  TrackingStyle,
+  TrackingTeam,
   ZoneData,
   ZonedShotchartInstance,
   ZonedShotchartOptions,
@@ -48,10 +55,19 @@ export { createColorScale, zoneColor } from "./themes/color-scale";
 
 export { polygonCentroid } from "./geometry/centroid";
 export { formatPercentage } from "./geometry/percentage";
-export { shotToSvg, svgToShot } from "./geometry/project";
+export { shotToSvg, svgToShot, trackingToSvg } from "./geometry/project";
 
 export { createHalfcourt } from "./halfcourt";
 export { createZonedShotchart } from "./zoned-shotchart";
 export { createShotScatter } from "./shot-scatter";
 export { binShots, createHexbinShotchart } from "./hexbin-shotchart";
 export { createFullcourt } from "./fullcourt";
+export { createTracking } from "./tracking";
+
+export { fromBbiTracking } from "./adapters/bbi";
+export type {
+  BbiBallFrameRow,
+  BbiPlayerFrameRow,
+  BbiRosterRow,
+  BbiTrackingOptions,
+} from "./adapters/bbi";
