@@ -30,6 +30,8 @@ export type {
   TrackingInstance,
   TrackingOptions,
   TrackingPlayer,
+  TrackingShapes,
+  TrackingShapeToggles,
   TrackingStyle,
   TrackingTeam,
   ZoneData,
@@ -56,6 +58,7 @@ export { createColorScale, zoneColor } from "./themes/color-scale";
 export { polygonCentroid } from "./geometry/centroid";
 export { formatPercentage } from "./geometry/percentage";
 export { shotToSvg, svgToShot, trackingToSvg } from "./geometry/project";
+export { teamCentroid, teamHull } from "./geometry/team";
 
 export { createHalfcourt } from "./halfcourt";
 export { createZonedShotchart } from "./zoned-shotchart";
@@ -68,6 +71,7 @@ export { fromBbiTracking } from "./adapters/bbi";
 export type {
   BbiBallFrameRow,
   BbiPlayerFrameRow,
+  BbiPossessionRow,
   BbiRosterRow,
   BbiTrackingOptions,
 } from "./adapters/bbi";

@@ -364,6 +364,23 @@ export interface TrackingFrame {
   shotClock?: number | null;
   players: TrackingPlayer[];
   ball?: TrackingBall | null;
+  /** Which side has the ball. Team shapes are only drawn when this is known. */
+  offense?: TrackingTeam;
+}
+
+/** Which shapes to draw for one team. Everything defaults to off. */
+export interface TrackingShapeToggles {
+  /** A ring + crosshair at the team's mean position. */
+  centroid?: boolean;
+  /** The convex hull around the team's players. */
+  hull?: boolean;
+  /** Lines from the centroid to each player. */
+  spokes?: boolean;
+}
+
+export interface TrackingShapes {
+  defense?: TrackingShapeToggles;
+  offense?: TrackingShapeToggles;
 }
 
 export interface TrackingStyle {
@@ -378,6 +395,12 @@ export interface TrackingStyle {
   labels: boolean;
   labelColor: string;
   opacity: number;
+  /** Fill opacity of the team hull. */
+  hullOpacity: number;
+  /** Centroid marker radius in feet. */
+  centroidRadius: number;
+  /** Spoke stroke width in feet. */
+  spokeWidth: number;
 }
 
 export interface TrackingOptions extends FullcourtOptions {
@@ -391,6 +414,10 @@ export interface TrackingOptions extends FullcourtOptions {
   loop?: boolean;
   /** Called whenever the displayed frame changes (playback or `setFrame`). */
   onFrame?: (index: number, frame: TrackingFrame) => void;
+  /** Team centroid / hull / spokes, per side of the ball. Defaults to none. */
+  shapes?: TrackingShapes;
+  /** Offense for frames without an `offense` field — e.g. a clip of one known possession. */
+  offense?: TrackingTeam;
 }
 
 export interface TrackingInstance {
@@ -408,6 +435,25 @@ export interface TrackingInstance {
   setData(data: TrackingFrame[]): void;
   /** Merge style overrides and re-render. */
   setStyle(style: Partial<TrackingStyle>): void;
+  /** Merge shape toggles (per team) and re-render. */
+  setShapes(shapes: TrackingShapes): void;
+  /** The displayed frame. */
+  current(): TrackingFrame | undefined;
+  /**
+   * An empty `<g>` above the built-in marks for your own drawing. Coordinates
+   * come from `project()`. It survives `setData` / `setStyle` / `setShapes`
+   * and is removed by `destroy()`.
+   */
+  overlay(): SVGGElement;
+  /** Tracking feet → `overlay()` coordinates. */
+  project(point: { x: number; y: number }): Point;
+  /** Subscribe to frame changes. Returns an unsubscribe function. */
+  addFrameListener(listener: (index: number, frame: TrackingFrame) => void): () => void;
+  /**
+   * The court layout. On `"horizontal"` the overlay sits inside a
+   * `rotate(-90)`, so give text `transform="rotate(90)"` to read upright.
+   */
+  readonly orientation: Orientation;
   /** Stop playback and remove the rendered chart from the host SVG. */
   destroy(): void;
 }

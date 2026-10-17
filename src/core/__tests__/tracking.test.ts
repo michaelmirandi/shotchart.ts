@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fromBbiTracking } from "../adapters/bbi";
 import { trackingToSvg } from "../geometry/project";
+import { teamCentroid, teamHull } from "../geometry/team";
 import { createShotchartSettings } from "../settings/chart";
 import { ncaamSettings } from "../settings/ncaam";
 import { createTracking } from "../tracking";
@@ -209,5 +210,163 @@ describe("fromBbiTracking", () => {
     expect(frames.map((f) => f.frame)).toEqual([1, 9]);
     expect(frames[0]?.ball).toBeNull();
     expect(frames[1]?.players).toHaveLength(1);
+  });
+});
+
+describe("teamCentroid / teamHull", () => {
+  const players = [
+    { id: 1, team: "home" as const, x: 0, y: 0 },
+    { id: 2, team: "home" as const, x: 4, y: 0 },
+    { id: 3, team: "home" as const, x: 4, y: 4 },
+    { id: 4, team: "home" as const, x: 0, y: 4 },
+    { id: 5, team: "home" as const, x: 2, y: 2 },
+    { id: 6, team: "away" as const, x: 30, y: 10 },
+  ];
+
+  it("centroid is the mean of the team's positions", () => {
+    expect(teamCentroid(players, "home")).toEqual({ x: 2, y: 2 });
+    expect(teamCentroid(players, "away")).toEqual({ x: 30, y: 10 });
+    expect(teamCentroid([], "home")).toBeNull();
+  });
+
+  it("hull wraps the outer players and skips interior ones", () => {
+    const hull = teamHull(players, "home");
+    expect(hull).toHaveLength(4);
+    expect(hull).not.toContainEqual({ x: 2, y: 2 });
+    expect(teamHull(players, "away")).toEqual([]);
+  });
+});
+
+describe("createTracking team shapes", () => {
+  const withOffense = (frames: TrackingFrame[]) =>
+    frames.map((f) => ({ ...f, offense: "away" as const }));
+  const count = (svg: SVGSVGElement, selector: string) => svg.querySelectorAll(selector).length;
+
+  it("draws nothing by default", () => {
+    const svg = makeSvg();
+    createTracking(svg, { data: withOffense(makeFrames(2)) });
+    expect(count(svg, ".tracking-shapes > *, .tracking-centroids > *")).toBe(0);
+  });
+
+  it("draws the defense hull, spokes and centroid in the defense color", () => {
+    const svg = makeSvg();
+    createTracking(svg, {
+      data: withOffense(makeFrames(2)),
+      shapes: { defense: { centroid: true, hull: true, spokes: true } },
+    });
+    // Away has the ball, so home (players 0–4) defends.
+    expect(count(svg, "path.tracking-hull--defense")).toBe(1);
+    expect(count(svg, "line.tracking-spoke--defense")).toBe(5);
+    expect(count(svg, "g.tracking-centroid--defense")).toBe(1);
+    expect(count(svg, ".tracking-hull--offense, .tracking-centroid--offense")).toBe(0);
+
+    const marker = svg.querySelector("g.tracking-centroid--defense");
+    expect(marker?.getAttribute("data-team")).toBe("home");
+    expect(marker?.querySelector(".tracking-centroid-ring")?.getAttribute("stroke")).toBe(
+      "#2563eb",
+    );
+
+    // Mean of players 0–4 at frame 0: x = -40 + 16 = -24, y = -20 + 8 = -12.
+    const settings = createShotchartSettings(ncaamSettings, "half");
+    const expected = trackingToSvg({ x: -24, y: -12 }, settings);
+    const [tx, ty] = translateOf(marker);
+    expect(tx).toBeCloseTo(expected.x);
+    expect(ty).toBeCloseTo(expected.y);
+  });
+
+  it("falls back to the offense option, and draws nothing when offense is unknown", () => {
+    const shapes = { offense: { centroid: true } };
+    const known = makeSvg();
+    createTracking(known, { data: makeFrames(1), offense: "home", shapes });
+    expect(known.querySelector("g.tracking-centroid--offense")?.getAttribute("data-team")).toBe(
+      "home",
+    );
+
+    const unknown = makeSvg();
+    createTracking(unknown, { data: makeFrames(1), shapes });
+    expect(count(unknown, "g.tracking-centroid")).toBe(0);
+  });
+
+  it("setShapes toggles shapes without rebuilding player nodes", () => {
+    const svg = makeSvg();
+    const chart = createTracking(svg, { data: withOffense(makeFrames(2)) });
+    const node = svg.querySelector('g.tracking-player[data-id="0"]');
+
+    chart.setShapes({ defense: { hull: true }, offense: { centroid: true } });
+    expect(count(svg, "path.tracking-hull--defense")).toBe(1);
+    expect(count(svg, "g.tracking-centroid--offense")).toBe(1);
+
+    chart.setShapes({ defense: { centroid: true } });
+    expect(count(svg, "path.tracking-hull--defense")).toBe(1);
+    expect(count(svg, "g.tracking-centroid--defense")).toBe(1);
+
+    chart.setShapes({ defense: { hull: false, centroid: false }, offense: { centroid: false } });
+    expect(count(svg, ".tracking-shapes > *, .tracking-centroids > *")).toBe(0);
+    expect(svg.querySelector('g.tracking-player[data-id="0"]')).toBe(node);
+  });
+});
+
+describe("createTracking overlay hooks", () => {
+  it("overlay() survives setData and is removed by destroy", () => {
+    const svg = makeSvg();
+    const chart = createTracking(svg, { data: makeFrames(2) });
+    const layer = chart.overlay();
+    layer.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "circle"));
+
+    chart.setData(makeFrames(3));
+    chart.setShapes({ defense: { hull: true } });
+    expect(chart.overlay()).toBe(layer);
+    expect(layer.childNodes).toHaveLength(1);
+    expect(layer.classList.contains("tracking-custom")).toBe(true);
+
+    chart.destroy();
+    expect(layer.isConnected).toBe(false);
+  });
+
+  it("project matches trackingToSvg and orientation is exposed", () => {
+    const chart = createTracking(makeSvg(), { courtType: "ncaam", data: makeFrames(1) });
+    const settings = createShotchartSettings(ncaamSettings, "half");
+    expect(chart.project({ x: -41.75, y: 3 })).toEqual(
+      trackingToSvg({ x: -41.75, y: 3 }, settings),
+    );
+    expect(chart.orientation).toBe("horizontal");
+  });
+
+  it("addFrameListener fires on frame changes until unsubscribed", () => {
+    const chart = createTracking(makeSvg(), { data: makeFrames(5) });
+    const listener = vi.fn();
+    const off = chart.addFrameListener(listener);
+
+    chart.setFrame(2);
+    expect(listener).toHaveBeenLastCalledWith(2, expect.objectContaining({ frame: 102 }));
+    expect(chart.current()?.frame).toBe(102);
+
+    off();
+    chart.setFrame(3);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fromBbiTracking possessions", () => {
+  const ballRows = [0, 1, 2, 3].map((f) => ({ frame_idx: String(f), x: "0", y: "0" }));
+  const possessions = [
+    { start_frame: "0", end_frame: "2", off_team_id_tracking: "57" },
+    { start_frame: "2", end_frame: "3", off_team_id_tracking: "33" },
+  ];
+
+  it("maps possessions to a side through the roster", () => {
+    const frames = fromBbiTracking([], ballRows, {
+      possessions,
+      roster: [
+        { player_id_tracking: "464", side: "home", team_id_tracking: "33" },
+        { player_id_tracking: "140", side: "away", team_id_tracking: "57" },
+      ],
+    });
+    expect(frames.map((f) => f.offense)).toEqual(["away", "away", "home", undefined]);
+  });
+
+  it("homeTeamId overrides the roster", () => {
+    const frames = fromBbiTracking([], ballRows, { possessions, homeTeamId: 57 });
+    expect(frames.map((f) => f.offense)).toEqual(["home", "home", "away", undefined]);
   });
 });

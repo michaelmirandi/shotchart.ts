@@ -19,7 +19,7 @@ npm install shotchart.ts
 yarn add shotchart.ts
 ```
 
-D3 modules (`d3-selection`, `d3-scale`, `d3-shape`, `d3-array`, `d3-hexbin`) are declared as runtime dependencies and installed automatically.
+D3 modules (`d3-selection`, `d3-scale`, `d3-shape`, `d3-array`, `d3-hexbin`, `d3-polygon`) are declared as runtime dependencies and installed automatically.
 
 ## Stylesheet
 
@@ -179,6 +179,7 @@ Coordinates are **feet from center court**: `x` along the court's length (basket
 | `shotClock` | `number \| null?`                                                    | Seconds left on the shot clock.                          |
 | `players`   | `{ id: string \| number; team: "home" \| "away"; x; y; label? }[]`   | `label` is drawn inside the dot (jersey number).         |
 | `ball`      | `{ x; y; z? } \| null?`                                              | The ball grows slightly with `z` as a height cue.        |
+| `offense`   | `"home" \| "away"?`                                                  | Which side has the ball. Needed for team shapes.         |
 
 A frame with no players (dead-ball gaps in some feeds) draws only the ball.
 
@@ -189,22 +190,82 @@ Takes every `createFullcourt` option plus:
 | Option    | Type                              | Default | Notes                                                    |
 | --------- | --------------------------------- | ------- | -------------------------------------------------------- |
 | `data`    | `TrackingFrame[]`                 | —       | Required.                                                |
-| `style`   | `Partial<TrackingStyle>`          | —       | `playerRadius` (1), `homeColor`, `awayColor`, `ballRadius` (0.5), `ballColor`, `labels` (true), `labelColor`, `opacity`. |
+| `style`   | `Partial<TrackingStyle>`          | —       | `playerRadius` (1), `homeColor`, `awayColor`, `ballRadius` (0.5), `ballColor`, `labels` (true), `labelColor`, `opacity`, `hullOpacity` (0.15), `centroidRadius` (0.8), `spokeWidth` (0.12). |
 | `fps`     | `number`                          | `25`    | Source frame rate.                                       |
 | `speed`   | `number`                          | `1`     | Playback multiplier.                                     |
 | `loop`    | `boolean`                         | `false` | Restart at the end instead of stopping.                  |
 | `onFrame` | `(index, frame) => void`          | —       | Fires whenever the displayed frame changes.              |
+| `shapes`  | `TrackingShapes`                  | none    | Team centroid / hull / spokes — see [Team shapes](#team-shapes). |
+| `offense` | `"home" \| "away"`                | —       | Offense for frames without an `offense` field (e.g. a one-possession clip). |
 
-Returns `{ setFrame(i), frame(), play(), pause(), isPlaying(), setSpeed(x), setData(frames), setStyle(style), destroy() }`. Marks live in `<g class="shot-chart-tracking">` as `g.tracking-player.tracking-player--home|--away` and `circle.tracking-ball`.
+Returns `{ setFrame(i), frame(), current(), play(), pause(), isPlaying(), setSpeed(x), setData(frames), setStyle(style), setShapes(shapes), overlay(), project(point), addFrameListener(cb), orientation, destroy() }`. Marks live in `<g class="shot-chart-tracking">` as `g.tracking-player.tracking-player--home|--away` and `circle.tracking-ball`.
+
+### Team shapes
+
+Every shape is off by default and toggles per side of the ball. Shapes need to know who has the ball — a frame's `offense` field, or the `offense` option as a fallback — and are drawn in that team's color.
+
+```ts
+const chart = createTracking(svg, {
+  data: frames,
+  shapes: { defense: { centroid: true, hull: true } },
+});
+
+chart.setShapes({ defense: { spokes: true }, offense: { centroid: true } }); // merges
+chart.setShapes({ defense: { hull: false } });
+```
+
+| Toggle     | Draws                                                                          | Class                                   |
+| ---------- | ------------------------------------------------------------------------------ | --------------------------------------- |
+| `centroid` | A ring + crosshair at the team's **mean** position (its center of mass).       | `g.tracking-centroid--defense\|--offense` |
+| `hull`     | The convex hull around the team — the shell it covers.                         | `path.tracking-hull--defense\|--offense`  |
+| `spokes`   | Dashed lines from the centroid to each player.                                 | `line.tracking-spoke--defense\|--offense` |
+
+The same math is exported for your own use: `teamCentroid(players, team)` and `teamHull(players, team)` return tracking-feet points.
+
+### Custom overlays
+
+Draw anything you like, kept in sync with playback. `overlay()` is an empty `<g>` above the built-in marks that survives `setData` / `setStyle` / `setShapes`; `project()` converts tracking feet into its coordinates; `addFrameListener()` fires on every frame change and returns an unsubscribe function.
+
+```ts
+import { select } from "d3-selection";
+import { createTracking } from "shotchart.ts";
+
+const chart = createTracking(svg, { courtType: "ncaam", data: frames });
+const layer = select(chart.overlay());
+const line = layer.append("line").attr("stroke", "black").attr("stroke-width", 0.15);
+const label = layer.append("text").attr("font-size", 1.4);
+
+// Ball → nearest defender.
+chart.addFrameListener((_, frame) => {
+  const defense = frame.offense === "home" ? "away" : "home";
+  const ball = frame.ball;
+  const defenders = frame.players.filter((p) => p.team === defense);
+  if (!ball || !frame.offense || defenders.length === 0) return;
+  const nearest = defenders.reduce((a, b) =>
+    Math.hypot(a.x - ball.x, a.y - ball.y) <= Math.hypot(b.x - ball.x, b.y - ball.y) ? a : b,
+  );
+  const from = chart.project(ball);
+  const to = chart.project(nearest);
+  line.attr("x1", from.x).attr("y1", from.y).attr("x2", to.x).attr("y2", to.y);
+  label
+    .attr("x", to.x)
+    .attr("y", to.y)
+    // On a horizontal court the overlay is rotated -90°; turn text back upright.
+    .attr("transform", chart.orientation === "horizontal" ? `rotate(90, ${to.x}, ${to.y})` : null)
+    .text(`${Math.hypot(nearest.x - ball.x, nearest.y - ball.y).toFixed(1)} ft`);
+});
+```
 
 ### BBI adapter
 
-`fromBbiTracking(playerRows, ballRows?, { roster? })` turns flat BBI `player_frames` / `ball_frames` rows (strings from a CSV parser or numbers) into `TrackingFrame[]`. Frames follow the ball rows, so dead-ball stretches without player data come back with `players: []`. BBI already uses feet from center court, so coordinates pass through unchanged.
+`fromBbiTracking(playerRows, ballRows?, { roster?, possessions?, homeTeamId? })` turns flat BBI `player_frames` / `ball_frames` rows (strings from a CSV parser or numbers) into `TrackingFrame[]`. Frames follow the ball rows, so dead-ball stretches without player data come back with `players: []`. BBI already uses feet from center court, so coordinates pass through unchanged.
+
+Pass `possessions` (`possessions.csv` rows) to set each frame's `offense` from the possession it falls in (`[start_frame, end_frame)`). Team ids map to home / away through the roster's `side` + `team_id_tracking` columns, or through `homeTeamId` (`games.csv` `home_team_id`).
 
 ```ts
 import { createTracking, fromBbiTracking } from "shotchart.ts";
 
-const frames = fromBbiTracking(playerRows, ballRows, { roster });
+const frames = fromBbiTracking(playerRows, ballRows, { roster, possessions });
 // One possession: cut by source frame index.
 const clip = frames.filter((f) => f.frame >= 1837 && f.frame <= 2300);
 createTracking(svg, { courtType: "ncaam", data: clip });
@@ -469,6 +530,10 @@ import {
   shotToSvg,
   svgToShot,
   trackingToSvg,
+
+  // team shapes (tracking feet)
+  teamCentroid,
+  teamHull,
 
   // tracking data
   fromBbiTracking,

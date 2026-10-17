@@ -29,11 +29,25 @@ export interface BbiBallFrameRow {
 export interface BbiRosterRow {
   player_id_tracking: Cell;
   jersey?: Cell;
+  /** `home` / `away` — with `team_id_tracking`, maps possessions to a side. */
+  side?: Cell;
+  team_id_tracking?: Cell;
+}
+
+/** One row of BBI `tracking_possessions` (`possessions.csv`). Extra columns are ignored. */
+export interface BbiPossessionRow {
+  start_frame: Cell;
+  end_frame: Cell;
+  off_team_id_tracking: Cell;
 }
 
 export interface BbiTrackingOptions {
-  /** Supplies jersey labels for player rows that lack a `jersey` column. */
+  /** Supplies jersey labels, and the team id → side mapping for `possessions`. */
   roster?: BbiRosterRow[];
+  /** Sets each frame's `offense` from the possession it falls in (`[start_frame, end_frame)`). */
+  possessions?: BbiPossessionRow[];
+  /** The home team's `*_team_id_tracking` (`games.csv` `home_team_id`). Overrides the roster mapping. */
+  homeTeamId?: Cell;
 }
 
 function num(value: Cell): number | null {
@@ -102,5 +116,38 @@ export function fromBbiTracking(
     frameFor(row, idx).players.push(player);
   }
 
-  return [...frames.values()].sort((a, b) => a.frame - b.frame);
+  const sorted = [...frames.values()].sort((a, b) => a.frame - b.frame);
+  if (options.possessions?.length) assignOffense(sorted, options);
+  return sorted;
+}
+
+function assignOffense(frames: TrackingFrame[], options: BbiTrackingOptions): void {
+  const sideOf = (teamId: Cell): TrackingTeam | undefined => {
+    const id = String(teamId);
+    if (options.homeTeamId !== undefined && options.homeTeamId !== null) {
+      return id === String(options.homeTeamId) ? "home" : "away";
+    }
+    const row = options.roster?.find((r) => String(r.team_id_tracking) === id);
+    return row?.side === "home" || row?.side === "away" ? row.side : undefined;
+  };
+
+  const spans = (options.possessions ?? [])
+    .map((p) => ({
+      start: num(p.start_frame),
+      end: num(p.end_frame),
+      team: sideOf(p.off_team_id_tracking),
+    }))
+    .filter(
+      (p): p is { start: number; end: number; team: TrackingTeam } =>
+        p.start !== null && p.end !== null && p.team !== undefined,
+    )
+    .sort((a, b) => a.start - b.start);
+
+  // Frames and spans are both sorted, so one forward sweep assigns everything.
+  let i = 0;
+  for (const frame of frames) {
+    while (i < spans.length && (spans[i]?.end ?? 0) <= frame.frame) i += 1;
+    const span = spans[i];
+    if (span && span.start <= frame.frame) frame.offense = span.team;
+  }
 }

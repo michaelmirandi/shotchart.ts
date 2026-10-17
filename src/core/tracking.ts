@@ -1,11 +1,16 @@
 import { mountFullcourt } from "./fullcourt";
 import { trackingToSvg } from "./geometry/project";
+import { teamCentroid, teamHull } from "./geometry/team";
 import type {
+  Point,
   TrackingFrame,
   TrackingInstance,
   TrackingOptions,
   TrackingPlayer,
+  TrackingShapeToggles,
+  TrackingShapes,
   TrackingStyle,
+  TrackingTeam,
 } from "./types";
 
 const DEFAULT_STYLE: TrackingStyle = {
@@ -17,7 +22,24 @@ const DEFAULT_STYLE: TrackingStyle = {
   labels: true,
   labelColor: "#ffffff",
   opacity: 1,
+  hullOpacity: 0.15,
+  centroidRadius: 0.8,
+  spokeWidth: 0.12,
 };
+
+type Role = keyof TrackingShapes;
+
+/** One side of the ball's shapes for the displayed frame, already in SVG coords. */
+interface TeamShape {
+  role: Role;
+  team: TrackingTeam;
+  toggles: TrackingShapeToggles;
+  centroid: Point;
+  hull: Point[];
+  spokes: { key: string; role: Role; team: TrackingTeam; from: Point; to: Point }[];
+}
+
+type FrameListener = (index: number, frame: TrackingFrame) => void;
 
 // The ball grows by its radius for every 20 ft of height — enough to read a
 // lob or a shot arc without hiding the players underneath.
@@ -37,6 +59,9 @@ export function createTracking(svg: SVGSVGElement, options: TrackingOptions): Tr
   const fps = options.fps ?? 25;
   const loop = options.loop ?? false;
   let speed = options.speed ?? 1;
+  let shapes: TrackingShapes = { ...options.shapes };
+  const listeners = new Set<FrameListener>();
+  const project = (p: { x: number; y: number }): Point => trackingToSvg(p, settings);
 
   // Fractional frame position while playing; the displayed index is its floor.
   let position = 0;
@@ -48,9 +73,128 @@ export function createTracking(svg: SVGSVGElement, options: TrackingOptions): Tr
   // labels need the opposite turn to read upright.
   const labelRotation = orientation === "horizontal" ? "rotate(90)" : null;
 
+  // Bottom to top: hulls + spokes, players, centroid markers, ball, caller's layer.
   const layer = layers.overlay.append("g").attr("class", "shot-chart-tracking");
+  const shapesLayer = layer.append("g").attr("class", "tracking-shapes");
   const playersLayer = layer.append("g").attr("class", "tracking-players");
+  const centroidsLayer = layer.append("g").attr("class", "tracking-centroids");
   const ball = layer.append("circle").attr("class", "tracking-ball");
+  const custom = layer.append("g").attr("class", "tracking-custom");
+
+  const teamColor = (team: TrackingTeam): string =>
+    team === "home" ? style.homeColor : style.awayColor;
+
+  function teamShapes(frame: TrackingFrame | undefined): TeamShape[] {
+    const offense = frame?.offense ?? options.offense;
+    if (!frame || !offense) return [];
+    const defense: TrackingTeam = offense === "home" ? "away" : "home";
+    const sides: [Role, TrackingTeam][] = [
+      ["defense", defense],
+      ["offense", offense],
+    ];
+
+    return sides.flatMap(([role, team]) => {
+      const toggles = shapes[role] ?? {};
+      if (!toggles.centroid && !toggles.hull && !toggles.spokes) return [];
+      const center = teamCentroid(frame.players, team);
+      if (!center) return [];
+      const centroid = project(center);
+      return [
+        {
+          role,
+          team,
+          toggles,
+          centroid,
+          hull: toggles.hull ? teamHull(frame.players, team).map(project) : [],
+          spokes: toggles.spokes
+            ? frame.players
+                .filter((p) => p.team === team)
+                .map((p) => ({
+                  key: `${role}-${p.id}`,
+                  role,
+                  team,
+                  from: centroid,
+                  to: project(p),
+                }))
+            : [],
+        },
+      ];
+    });
+  }
+
+  function renderShapes(frame: TrackingFrame | undefined): void {
+    const teams = teamShapes(frame);
+
+    shapesLayer
+      .selectAll<SVGPathElement, TeamShape>("path.tracking-hull")
+      .data(
+        teams.filter((t) => t.hull.length > 0),
+        (d) => d.role,
+      )
+      .join("path")
+      .attr("class", (d) => `tracking-hull tracking-hull--${d.role}`)
+      .attr("data-team", (d) => d.team)
+      .attr("d", (d) => `M${d.hull.map((p) => `${p.x},${p.y}`).join("L")}Z`)
+      .attr("fill", (d) => teamColor(d.team))
+      .attr("fill-opacity", style.hullOpacity)
+      .attr("stroke", (d) => teamColor(d.team))
+      .attr("stroke-opacity", 0.6)
+      .attr("stroke-width", style.spokeWidth)
+      .attr("stroke-linejoin", "round");
+
+    shapesLayer
+      .selectAll<SVGLineElement, TeamShape["spokes"][number]>("line.tracking-spoke")
+      .data(
+        teams.flatMap((t) => t.spokes),
+        (d) => d.key,
+      )
+      .join("line")
+      .attr("class", (d) => `tracking-spoke tracking-spoke--${d.role}`)
+      .attr("x1", (d) => d.from.x)
+      .attr("y1", (d) => d.from.y)
+      .attr("x2", (d) => d.to.x)
+      .attr("y2", (d) => d.to.y)
+      .attr("stroke", (d) => teamColor(d.team))
+      .attr("stroke-opacity", 0.7)
+      .attr("stroke-width", style.spokeWidth)
+      .attr("stroke-dasharray", `${style.spokeWidth * 4} ${style.spokeWidth * 3}`);
+
+    // A hollow ring + crosshair, so the centroid never reads as a player dot.
+    const r = style.centroidRadius;
+    const markers = centroidsLayer
+      .selectAll<SVGGElement, TeamShape>("g.tracking-centroid")
+      .data(
+        teams.filter((t) => t.toggles.centroid),
+        (d) => d.role,
+      )
+      .join((enter) => {
+        const g = enter.append("g");
+        g.append("circle").attr("class", "tracking-centroid-halo").attr("fill", "none");
+        g.append("circle").attr("class", "tracking-centroid-ring").attr("fill", "none");
+        g.append("path").attr("class", "tracking-centroid-cross").attr("fill", "none");
+        return g;
+      })
+      .attr("class", (d) => `tracking-centroid tracking-centroid--${d.role}`)
+      .attr("data-team", (d) => d.team)
+      .attr("transform", (d) => `translate(${d.centroid.x}, ${d.centroid.y})`);
+
+    markers
+      .select(".tracking-centroid-halo")
+      .attr("r", r)
+      .attr("stroke", "#ffffff")
+      .attr("stroke-opacity", 0.85)
+      .attr("stroke-width", style.spokeWidth * 3.5);
+    markers
+      .select(".tracking-centroid-ring")
+      .attr("r", r)
+      .attr("stroke", (d) => teamColor(d.team))
+      .attr("stroke-width", style.spokeWidth * 1.5);
+    markers
+      .select(".tracking-centroid-cross")
+      .attr("d", `M${-r * 1.6},0H${r * 1.6}M0,${-r * 1.6}V${r * 1.6}`)
+      .attr("stroke", (d) => teamColor(d.team))
+      .attr("stroke-width", style.spokeWidth);
+  }
 
   function render(): void {
     const current = frames[index];
@@ -107,6 +251,8 @@ export function createTracking(svg: SVGSVGElement, options: TrackingOptions): Tr
     } else {
       ball.attr("display", "none");
     }
+
+    renderShapes(current);
   }
 
   function show(next: number): void {
@@ -115,7 +261,9 @@ export function createTracking(svg: SVGSVGElement, options: TrackingOptions): Tr
     index = clamped;
     render();
     const current = frames[index];
-    if (current) options.onFrame?.(index, current);
+    if (!current) return;
+    options.onFrame?.(index, current);
+    for (const listener of listeners) listener(index, current);
   }
 
   function stop(): void {
@@ -178,8 +326,31 @@ export function createTracking(svg: SVGSVGElement, options: TrackingOptions): Tr
       style = { ...style, ...next };
       render();
     },
+    setShapes(next: TrackingShapes): void {
+      shapes = {
+        defense: { ...shapes.defense, ...next.defense },
+        offense: { ...shapes.offense, ...next.offense },
+      };
+      renderShapes(frames[index]);
+    },
+    current(): TrackingFrame | undefined {
+      return frames[index];
+    },
+    overlay(): SVGGElement {
+      // Appended above and only removed by destroy(), so the node always exists.
+      return custom.node() as SVGGElement;
+    },
+    project,
+    addFrameListener(listener: FrameListener): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    orientation,
     destroy(): void {
       stop();
+      listeners.clear();
       layers.destroy();
     },
   };
